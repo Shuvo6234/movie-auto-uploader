@@ -1,1 +1,103 @@
+import time
+from pathlib import Path
 
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+CHUNK_SIZE = 1024 * 1024  # 1 MB
+
+
+def create_session() -> requests.Session:
+    session = requests.Session()
+
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "HEAD"],
+        raise_on_status=False,
+    )
+
+    adapter = HTTPAdapter(max_retries=retry)
+
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    session.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/130.0 Safari/537.36"
+            )
+        }
+    )
+
+    return session
+
+
+def download_file(
+    url: str,
+    output_path: str,
+    timeout: int = 60,
+) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_file = output.with_suffix(output.suffix + ".part")
+
+    session = create_session()
+
+    try:
+        with session.get(
+            url,
+            stream=True,
+            timeout=(20, timeout),
+            allow_redirects=True,
+        ) as response:
+
+            response.raise_for_status()
+
+            content_length = response.headers.get("Content-Length")
+
+            expected_size = (
+                int(content_length)
+                if content_length and content_length.isdigit()
+                else None
+            )
+
+            downloaded = 0
+
+            with open(temp_file, "wb") as file:
+                for chunk in response.iter_content(
+                    chunk_size=CHUNK_SIZE
+                ):
+                    if not chunk:
+                        continue
+
+                    file.write(chunk)
+                    downloaded += len(chunk)
+
+            if downloaded == 0:
+                raise RuntimeError("Downloaded file is empty.")
+
+            if expected_size is not None and downloaded != expected_size:
+                raise RuntimeError(
+                    f"Incomplete download: "
+                    f"{downloaded} / {expected_size} bytes"
+                )
+
+        temp_file.replace(output)
+
+        return output
+
+    except Exception:
+        if temp_file.exists():
+            temp_file.unlink()
+
+        raise
