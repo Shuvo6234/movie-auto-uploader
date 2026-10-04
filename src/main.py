@@ -19,14 +19,16 @@ def main() -> int:
     print("Movie Auto Uploader started")
     print("=" * 60)
 
-    # Hard daily limit:
-    # Only one successfully verified Google Drive upload per day.
+    # দিনে সফলভাবে সর্বোচ্চ ১টি upload
     if uploaded_today():
         print("Today's successful upload limit has already been reached.")
-        print("Stopping without downloading another movie.")
+        print("Stopping.")
         return 0
 
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    DOWNLOAD_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     session = create_session()
 
@@ -44,11 +46,9 @@ def main() -> int:
 
     print(f"Found: {movie.title}")
     print(f"Source: {movie.source_url}")
-    print(f"Download page: {movie.download_url}")
+    print(f"Download URL: {movie.download_url}")
 
-    # Duplicate protection:
-    # Source ID or canonical source URL must not already exist
-    # in the permanent database.
+    # আগে upload করা হয়েছে কিনা check
     if is_downloaded(
         source_id=movie.source_id,
         source_url=movie.source_url,
@@ -56,6 +56,7 @@ def main() -> int:
         print("Movie already uploaded. Nothing to do.")
         return 0
 
+    # Safe filename তৈরি
     safe_title = "".join(
         c if c.isalnum() or c in " ._-()" else "_"
         for c in movie.title
@@ -64,14 +65,16 @@ def main() -> int:
     if not safe_title:
         safe_title = movie.source_id
 
-    output_path = DOWNLOAD_DIR / f"{safe_title} [1080p x264].mkv"
+    output_path = (
+        DOWNLOAD_DIR
+        / f"{safe_title} [1080p x264].mkv"
+    )
 
     print(f"Output file: {output_path}")
+
+    # Download
     print("Starting download...")
 
-    # ---------------------------------------------------------
-    # DOWNLOAD
-    # ---------------------------------------------------------
     try:
         downloaded_file = download_file(
             movie.download_url,
@@ -93,9 +96,7 @@ def main() -> int:
 
     print(f"Download completed: {file_size} bytes")
 
-    # ---------------------------------------------------------
-    # GOOGLE DRIVE UPLOAD
-    # ---------------------------------------------------------
+    # Google Drive upload
     print("Uploading to Google Drive...")
 
     try:
@@ -109,9 +110,7 @@ def main() -> int:
 
     print(f"Drive file ID: {drive_file_id}")
 
-    # ---------------------------------------------------------
-    # VERIFY UPLOAD
-    # ---------------------------------------------------------
+    # Upload verification
     print("Verifying Google Drive upload...")
 
     try:
@@ -124,19 +123,12 @@ def main() -> int:
         return 1
 
     if not verified:
-        print("VERIFICATION FAILED: file verification did not pass.")
+        print("VERIFICATION FAILED.")
         return 1
 
     print("Drive upload verified successfully.")
 
-    # ---------------------------------------------------------
-    # SAVE SUCCESS TO PERMANENT DATABASE
-    # ---------------------------------------------------------
-    # IMPORTANT:
-    # The movie is recorded only AFTER:
-    # 1. Download succeeded
-    # 2. Google Drive upload succeeded
-    # 3. Google Drive verification succeeded
+    # Upload সফল হওয়ার পরেই database-এ save
     add_completed_movie(
         source_id=movie.source_id,
         title=movie.title,
@@ -147,14 +139,12 @@ def main() -> int:
 
     print("Movie recorded in database.")
 
-    # ---------------------------------------------------------
-    # REMOVE LOCAL TEMPORARY FILE
-    # ---------------------------------------------------------
+    # GitHub runner থেকে temporary file delete
     try:
         downloaded_file.unlink()
         print("Local temporary file removed.")
     except OSError as exc:
-        print(f"Warning: could not remove temporary file: {exc}")
+        print(f"Warning: could not remove local file: {exc}")
 
     print("=" * 60)
     print("SUCCESS: 1 movie uploaded.")
