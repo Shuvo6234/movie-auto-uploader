@@ -56,7 +56,7 @@ def main() -> int:
     if not safe_title:
         safe_title = movie.source_id
 
-    output_path = DOWNLOAD_DIR / f"{safe_title} [1080p x264].mp4"
+    output_path = DOWNLOAD_DIR / f"{safe_title} [1080p x264].mkv"
 
     print("Starting download...")
 
