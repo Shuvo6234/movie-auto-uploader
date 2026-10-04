@@ -6,7 +6,7 @@ from database import (
     is_downloaded,
     uploaded_today,
 )
-from downloader import download_file
+from src.downloader import download_file
 from drive import upload_file, verify_upload
 from scraper import create_session, find_latest_movie
 
