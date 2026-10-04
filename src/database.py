@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +47,10 @@ def save_database(data: dict[str, Any]) -> None:
     temp_file.replace(DB_FILE)
 
 
-def is_downloaded(source_id: str | None = None, source_url: str | None = None) -> bool:
+def is_downloaded(
+    source_id: str | None = None,
+    source_url: str | None = None,
+) -> bool:
     data = load_database()
 
     for movie in data["movies"]:
@@ -54,6 +58,30 @@ def is_downloaded(source_id: str | None = None, source_url: str | None = None) -
             return True
 
         if source_url and movie.get("source_url") == source_url:
+            return True
+
+    return False
+
+
+def uploaded_today() -> bool:
+    data = load_database()
+
+    today = datetime.now(timezone.utc).date()
+
+    for movie in data["movies"]:
+        uploaded_at = movie.get("uploaded_at")
+
+        if not uploaded_at:
+            continue
+
+        try:
+            uploaded_date = datetime.fromisoformat(
+                uploaded_at.replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            continue
+
+        if uploaded_date == today:
             return True
 
     return False
@@ -75,9 +103,7 @@ def add_completed_movie(
             "source_url": source_url,
             "quality": quality,
             "drive_file_id": drive_file_id,
-            "uploaded_at": __import__("datetime")
-            .datetime.now(__import__("datetime").timezone.utc)
-            .isoformat(),
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
         }
     )
 
