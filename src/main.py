@@ -1,14 +1,14 @@
 import sys
 from pathlib import Path
 
-from database import (
+from src.database import (
     add_completed_movie,
     is_downloaded,
     uploaded_today,
 )
 from src.downloader import download_file
-from drive import upload_file, verify_upload
-from scraper import create_session, find_latest_movie
+from src.drive import upload_file, verify_upload
+from src.scraper import create_session, find_latest_movie
 
 
 DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "downloads"
@@ -19,7 +19,8 @@ def main() -> int:
     print("Movie Auto Uploader started")
     print("=" * 60)
 
-    # Hard daily limit.
+    # Hard daily limit:
+    # Only one successfully verified Google Drive upload per day.
     if uploaded_today():
         print("Today's successful upload limit has already been reached.")
         print("Stopping without downloading another movie.")
@@ -31,7 +32,11 @@ def main() -> int:
 
     print("Searching for an eligible movie...")
 
-    movie = find_latest_movie(session)
+    try:
+        movie = find_latest_movie(session)
+    except Exception as exc:
+        print(f"SCRAPER FAILED: {exc}")
+        return 1
 
     if movie is None:
         print("No movie with exact 1080p x264 was found.")
@@ -41,6 +46,9 @@ def main() -> int:
     print(f"Source: {movie.source_url}")
     print(f"Download page: {movie.download_url}")
 
+    # Duplicate protection:
+    # Source ID or canonical source URL must not already exist
+    # in the permanent database.
     if is_downloaded(
         source_id=movie.source_id,
         source_url=movie.source_url,
@@ -58,8 +66,12 @@ def main() -> int:
 
     output_path = DOWNLOAD_DIR / f"{safe_title} [1080p x264].mkv"
 
+    print(f"Output file: {output_path}")
     print("Starting download...")
 
+    # ---------------------------------------------------------
+    # DOWNLOAD
+    # ---------------------------------------------------------
     try:
         downloaded_file = download_file(
             movie.download_url,
@@ -81,6 +93,9 @@ def main() -> int:
 
     print(f"Download completed: {file_size} bytes")
 
+    # ---------------------------------------------------------
+    # GOOGLE DRIVE UPLOAD
+    # ---------------------------------------------------------
     print("Uploading to Google Drive...")
 
     try:
@@ -94,6 +109,9 @@ def main() -> int:
 
     print(f"Drive file ID: {drive_file_id}")
 
+    # ---------------------------------------------------------
+    # VERIFY UPLOAD
+    # ---------------------------------------------------------
     print("Verifying Google Drive upload...")
 
     try:
@@ -106,13 +124,19 @@ def main() -> int:
         return 1
 
     if not verified:
-        print("VERIFICATION FAILED.")
+        print("VERIFICATION FAILED: file verification did not pass.")
         return 1
 
     print("Drive upload verified successfully.")
 
+    # ---------------------------------------------------------
+    # SAVE SUCCESS TO PERMANENT DATABASE
+    # ---------------------------------------------------------
     # IMPORTANT:
-    # Only after successful verification do we record completion.
+    # The movie is recorded only AFTER:
+    # 1. Download succeeded
+    # 2. Google Drive upload succeeded
+    # 3. Google Drive verification succeeded
     add_completed_movie(
         source_id=movie.source_id,
         title=movie.title,
@@ -123,6 +147,9 @@ def main() -> int:
 
     print("Movie recorded in database.")
 
+    # ---------------------------------------------------------
+    # REMOVE LOCAL TEMPORARY FILE
+    # ---------------------------------------------------------
     try:
         downloaded_file.unlink()
         print("Local temporary file removed.")
