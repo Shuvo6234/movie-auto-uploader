@@ -13,9 +13,11 @@ permissions:
 jobs:
   upload:
     runs-on: ubuntu-latest
+
     timeout-minutes: 300
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -37,6 +39,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+
         run: |
           python - <<'PY'
           import os
@@ -67,7 +70,9 @@ jobs:
               credentials=credentials,
           )
 
-          folder_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
+          folder_id = os.environ[
+              "GOOGLE_DRIVE_FOLDER_ID"
+          ]
 
           print("Checking target folder...")
 
@@ -91,7 +96,9 @@ jobs:
 
           print("Folder access: OK")
 
-          test_file = Path("drive_access_test.txt")
+          test_file = Path(
+              "drive_access_test.txt"
+          )
 
           test_file.write_text(
               "Google Drive access test",
@@ -131,7 +138,9 @@ jobs:
               fileId=test_file_id
           ).execute()
 
-          test_file.unlink(missing_ok=True)
+          test_file.unlink(
+              missing_ok=True
+          )
 
           print("Temporary test file deleted.")
           print("Google Drive test completed successfully.")
@@ -143,8 +152,9 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+
         run: |
-          python src/main.py
+          python -m src.main
 
       - name: Save permanent database
         run: |
