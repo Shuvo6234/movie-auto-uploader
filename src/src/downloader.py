@@ -1,4 +1,3 @@
-import time
 from pathlib import Path
 
 import requests
@@ -7,6 +6,15 @@ from urllib3.util.retry import Retry
 
 
 CHUNK_SIZE = 1024 * 1024  # 1 MB
+
+HTML_MARKERS = (
+    b"<!doctype html",
+    b"<html",
+    b"<head",
+    b"<body",
+    b"verify that you are human",
+    b"captcha",
+)
 
 
 def create_session() -> requests.Session:
@@ -41,11 +49,18 @@ def create_session() -> requests.Session:
     return session
 
 
+def looks_like_html(data: bytes) -> bool:
+    sample = data[:8192].lower()
+
+    return any(marker in sample for marker in HTML_MARKERS)
+
+
 def download_file(
     url: str,
     output_path: str,
     timeout: int = 60,
 ) -> Path:
+
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -63,22 +78,48 @@ def download_file(
 
             response.raise_for_status()
 
-            content_length = response.headers.get("Content-Length")
-
-            expected_size = (
-                int(content_length)
-                if content_length and content_length.isdigit()
-                else None
+            content_type = (
+                response.headers.get("Content-Type", "")
+                .split(";")[0]
+                .strip()
+                .lower()
             )
 
+            print(f"Final URL: {response.url}")
+            print(f"Content-Type: {content_type}")
+
+            if content_type == "text/html":
+                raise RuntimeError(
+                    "Download URL returned an HTML page, not a video file."
+                )
+
+            expected_size = None
+
+            content_length = response.headers.get("Content-Length")
+
+            if content_length and content_length.isdigit():
+                expected_size = int(content_length)
+
             downloaded = 0
+            first_chunk = True
 
             with open(temp_file, "wb") as file:
+
                 for chunk in response.iter_content(
                     chunk_size=CHUNK_SIZE
                 ):
+
                     if not chunk:
                         continue
+
+                    if first_chunk:
+                        first_chunk = False
+
+                        if looks_like_html(chunk):
+                            raise RuntimeError(
+                                "Download response looks like HTML/CAPTCHA, "
+                                "not a video file."
+                            )
 
                     file.write(chunk)
                     downloaded += len(chunk)
@@ -86,17 +127,19 @@ def download_file(
             if downloaded == 0:
                 raise RuntimeError("Downloaded file is empty.")
 
-            if expected_size is not None and downloaded != expected_size:
-                raise RuntimeError(
-                    f"Incomplete download: "
-                    f"{downloaded} / {expected_size} bytes"
-                )
+            if expected_size is not None:
+                if downloaded != expected_size:
+                    raise RuntimeError(
+                        f"Incomplete download: "
+                        f"{downloaded} / {expected_size} bytes"
+                    )
 
         temp_file.replace(output)
 
         return output
 
     except Exception:
+
         if temp_file.exists():
             temp_file.unlink()
 
