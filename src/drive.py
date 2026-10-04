@@ -6,13 +6,24 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+SCOPES = [
+    "https://www.googleapis.com/auth/drive"
+]
 
 
 def get_drive_service():
-    client_id = os.environ["GOOGLE_CLIENT_ID"]
-    client_secret = os.environ["GOOGLE_CLIENT_SECRET"]
-    refresh_token = os.environ["GOOGLE_REFRESH_TOKEN"]
+
+    client_id = os.environ[
+        "GOOGLE_CLIENT_ID"
+    ]
+
+    client_secret = os.environ[
+        "GOOGLE_CLIENT_SECRET"
+    ]
+
+    refresh_token = os.environ[
+        "GOOGLE_REFRESH_TOKEN"
+    ]
 
     credentials = Credentials(
         token=None,
@@ -23,20 +34,35 @@ def get_drive_service():
         scopes=SCOPES,
     )
 
-    return build("drive", "v3", credentials=credentials)
+    return build(
+        "drive",
+        "v3",
+        credentials=credentials,
+    )
 
 
-def upload_file(file_path: str, file_name: str | None = None) -> str:
+def upload_file(
+    file_path: str,
+    file_name: str | None = None,
+) -> str:
+
     service = get_drive_service()
 
-    folder_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
+    folder_id = os.environ[
+        "GOOGLE_DRIVE_FOLDER_ID"
+    ]
 
     path = Path(file_path)
 
     if not path.exists():
-        raise FileNotFoundError(f"File not found: {path}")
+        raise FileNotFoundError(
+            f"File not found: {path}"
+        )
 
-    upload_name = file_name or path.name
+    upload_name = (
+        file_name
+        or path.name
+    )
 
     metadata = {
         "name": upload_name,
@@ -53,7 +79,10 @@ def upload_file(file_path: str, file_name: str | None = None) -> str:
         .create(
             body=metadata,
             media_body=media,
-            fields="id,name,size,mimeType,parents",
+            fields=(
+                "id,name,size,"
+                "mimeType,parents"
+            ),
         )
         .execute()
     )
@@ -61,19 +90,28 @@ def upload_file(file_path: str, file_name: str | None = None) -> str:
     file_id = result.get("id")
 
     if not file_id:
-        raise RuntimeError("Google Drive did not return a file ID.")
+        raise RuntimeError(
+            "Google Drive did not return a file ID."
+        )
 
     return file_id
 
 
-def verify_upload(file_id: str, expected_size: int | None = None) -> bool:
+def verify_upload(
+    file_id: str,
+    expected_size: int | None = None,
+) -> bool:
+
     service = get_drive_service()
 
     result = (
         service.files()
         .get(
             fileId=file_id,
-            fields="id,name,size,mimeType,parents",
+            fields=(
+                "id,name,size,"
+                "mimeType,parents"
+            ),
         )
         .execute()
     )
@@ -82,7 +120,10 @@ def verify_upload(file_id: str, expected_size: int | None = None) -> bool:
         return False
 
     if expected_size is not None:
-        uploaded_size = int(result.get("size", 0))
+
+        uploaded_size = int(
+            result.get("size", 0)
+        )
 
         if uploaded_size != expected_size:
             return False
