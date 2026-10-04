@@ -31,7 +31,8 @@ def create_session() -> requests.Session:
         ),
         "Accept": (
             "text/html,application/xhtml+xml,"
-            "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            "application/xml;q=0.9,"
+            "image/avif,image/webp,*/*;q=0.8"
         ),
         "Accept-Language": "en-US,en;q=0.9",
     })
@@ -74,8 +75,13 @@ def is_movie_url(url: str) -> bool:
     )
 
 
-def find_movie_links(session: requests.Session) -> list[str]:
-    print(f"Opening source website: {BASE_URL}")
+def find_movie_links(
+    session: requests.Session,
+) -> list[str]:
+
+    print(
+        f"Opening source website: {BASE_URL}"
+    )
 
     response = session.get(
         BASE_URL,
@@ -91,7 +97,10 @@ def find_movie_links(session: requests.Session) -> list[str]:
 
     links = []
 
-    for anchor in soup.find_all("a", href=True):
+    for anchor in soup.find_all(
+        "a",
+        href=True,
+    ):
         href = anchor.get("href")
 
         if not href:
@@ -108,12 +117,12 @@ def find_movie_links(session: requests.Session) -> list[str]:
     return links
 
 
-def extract_title(soup: BeautifulSoup, source_id: str) -> str:
-    """
-    Extract a useful movie title from the movie page.
-    """
+def extract_title(
+    soup: BeautifulSoup,
+    source_id: str,
+) -> str:
 
-    # First try H1.
+    # Prefer the main H1.
     heading = soup.find("h1")
 
     if heading:
@@ -125,7 +134,7 @@ def extract_title(soup: BeautifulSoup, source_id: str) -> str:
         if title:
             return title
 
-    # Then try page title.
+    # Fallback to <title>.
     if soup.title:
         title = soup.title.get_text(
             " ",
@@ -133,9 +142,15 @@ def extract_title(soup: BeautifulSoup, source_id: str) -> str:
         )
 
         if title:
-            # Remove common website suffix.
             title = re.sub(
                 r"\s*[-|]\s*Vegamovies.*$",
+                "",
+                title,
+                flags=re.IGNORECASE,
+            ).strip()
+
+            title = re.sub(
+                r"^Download\s+",
                 "",
                 title,
                 flags=re.IGNORECASE,
@@ -146,209 +161,198 @@ def extract_title(soup: BeautifulSoup, source_id: str) -> str:
     return source_id
 
 
-def find_quality_link(
-    soup: BeautifulSoup,
-    movie_url: str,
-) -> str | None:
-    """
-    Find the download link associated with the exact
-    '1080p x264' quality label.
-
-    Important:
-    The old scraper used parent.find('a'), which could
-    accidentally return the site's homepage link.
-
-    This function instead looks AFTER the exact quality
-    heading and validates the candidate URL.
-    """
-
-    base_url_normalized = normalize_url(BASE_URL).rstrip("/")
-
-    movie_url_normalized = normalize_url(
-        movie_url
-    ).rstrip("/")
-
-    # Find elements containing the exact quality text.
-    candidates = []
-
-    for element in soup.find_all(
-        ["h1", "h2", "h3", "h4", "div", "span", "p", "strong", "b"]
-    ):
-        text = element.get_text(
-            " ",
-            strip=True,
-        )
-
-        if EXACT_QUALITY.lower() in text.lower():
-            candidates.append(element)
-
-    print(
-        f"Found {len(candidates)} element(s) containing "
-        f"'{EXACT_QUALITY}'."
-    )
-
-    for quality_element in candidates:
-
-        print(
-            "Checking quality element:",
-            quality_element.get_text(
-                " ",
-                strip=True,
-            ),
-        )
-
-        # --------------------------------------------------
-        # 1. If the quality element itself contains a link
-        # --------------------------------------------------
-
-        direct_link = quality_element.find(
-            "a",
-            href=True,
-        )
-
-        if direct_link:
-            href = direct_link.get("href")
-
-            if href:
-                candidate_url = normalize_url(href)
-
-                if _is_valid_download_candidate(
-                    candidate_url,
-                    base_url_normalized,
-                    movie_url_normalized,
-                ):
-                    print(
-                        "Download link found directly:",
-                        candidate_url,
-                    )
-
-                    return candidate_url
-
-        # --------------------------------------------------
-        # 2. Check the immediate parent/container
-        # --------------------------------------------------
-
-        parent = quality_element.parent
-
-        if parent:
-            parent_link = parent.find(
-                "a",
-                href=True,
-            )
-
-            if parent_link:
-                href = parent_link.get("href")
-
-                if href:
-                    candidate_url = normalize_url(href)
-
-                    if _is_valid_download_candidate(
-                        candidate_url,
-                        base_url_normalized,
-                        movie_url_normalized,
-                    ):
-                        print(
-                            "Download link found in parent:",
-                            candidate_url,
-                        )
-
-                        return candidate_url
-
-        # --------------------------------------------------
-        # 3. Most important:
-        #    find the NEXT link after the quality heading
-        # --------------------------------------------------
-
-        next_link = quality_element.find_next(
-            "a",
-            href=True,
-        )
-
-        while next_link:
-
-            href = next_link.get("href")
-
-            if href:
-                candidate_url = normalize_url(href)
-
-                if _is_valid_download_candidate(
-                    candidate_url,
-                    base_url_normalized,
-                    movie_url_normalized,
-                ):
-                    print(
-                        "Download link found after quality label:",
-                        candidate_url,
-                    )
-
-                    return candidate_url
-
-            next_link = next_link.find_next(
-                "a",
-                href=True,
-            )
-
-    return None
+def _clean_text(text: str) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
 
 
-def _is_valid_download_candidate(
-    candidate_url: str,
-    base_url: str,
+def _is_valid_download_link(
+    url: str,
     movie_url: str,
 ) -> bool:
-    """
-    Reject obvious non-download links.
-    """
 
-    candidate = candidate_url.rstrip("/")
-
-    # Never use the homepage as the download URL.
-    if candidate == base_url:
-        print(
-            "Rejected candidate: source homepage."
-        )
+    if not url:
         return False
 
-    # Never use the movie page itself.
-    if candidate == movie_url:
-        print(
-            "Rejected candidate: movie page itself."
-        )
+    normalized = normalize_url(url).rstrip("/")
+
+    base = BASE_URL.rstrip("/")
+
+    movie = normalize_url(movie_url).rstrip("/")
+
+    # Never accept homepage.
+    if normalized == base:
         return False
 
-    parsed = urlparse(candidate)
+    # Never accept the movie page itself.
+    if normalized == movie:
+        return False
+
+    parsed = urlparse(normalized)
 
     if parsed.scheme not in (
         "http",
         "https",
     ):
-        print(
-            "Rejected candidate: invalid URL scheme:",
-            candidate_url,
-        )
         return False
 
-    # Reject javascript/data links.
-    if candidate.lower().startswith(
+    # Reject obvious non-web links.
+    if normalized.lower().startswith(
         (
             "javascript:",
             "data:",
             "mailto:",
         )
     ):
-        print(
-            "Rejected candidate:",
-            candidate_url,
-        )
         return False
 
     return True
+
+
+def _find_link_after_quality_heading(
+    quality_heading,
+    movie_url: str,
+) -> str | None:
+
+    """
+    The actual page structure is approximately:
+
+        <h3>1080p x264</h3>
+        <h3></h3>
+        <a href="https://nexdrive.you/...">
+            Click Here To Download [2.5GB]
+        </a>
+
+    So we inspect the nearby siblings rather than searching
+    the entire remainder of the document.
+    """
+
+    # First inspect following siblings.
+    sibling = quality_heading.next_sibling
+
+    checked_nodes = 0
+
+    while sibling is not None and checked_nodes < 12:
+
+        checked_nodes += 1
+
+        # If it is an element.
+        if getattr(
+            sibling,
+            "name",
+            None,
+        ):
+
+            # If sibling itself is an anchor.
+            if sibling.name == "a":
+                href = sibling.get("href")
+
+                if href and _is_valid_download_link(
+                    href,
+                    movie_url,
+                ):
+                    return normalize_url(href)
+
+            # Otherwise look for an anchor directly
+            # inside this nearby sibling.
+            anchor = sibling.find(
+                "a",
+                href=True,
+            )
+
+            if anchor:
+                href = anchor.get("href")
+
+                if href and _is_valid_download_link(
+                    href,
+                    movie_url,
+                ):
+                    return normalize_url(href)
+
+        sibling = sibling.next_sibling
+
+    return None
+
+
+def find_quality_link(
+    soup: BeautifulSoup,
+    movie_url: str,
+) -> str | None:
+
+    """
+    Find the exact movie download block.
+
+    IMPORTANT:
+    We require an element whose normalized text is exactly:
+
+        1080p x264
+
+    This prevents the navigation menu's many
+    '1080p' strings from being selected.
+    """
+
+    quality_headings = []
+
+    for element in soup.find_all(
+        ["h2", "h3", "h4"],
+    ):
+        text = _clean_text(
+            element.get_text(
+                " ",
+                strip=True,
+            )
+        )
+
+        if text.lower() == EXACT_QUALITY.lower():
+            quality_headings.append(element)
+
+    print(
+        f"Found {len(quality_headings)} exact "
+        f"'{EXACT_QUALITY}' heading(s)."
+    )
+
+    if not quality_headings:
+        return None
+
+    for heading in quality_headings:
+
+        print(
+            "Exact quality heading found:",
+            _clean_text(
+                heading.get_text(
+                    " ",
+                    strip=True,
+                )
+            ),
+        )
+
+        download_url = (
+            _find_link_after_quality_heading(
+                heading,
+                movie_url,
+            )
+        )
+
+        if download_url:
+
+            print(
+                "Correct download link found:",
+                download_url,
+            )
+
+            return download_url
+
+    return None
 
 
 def extract_movie_info(
     session: requests.Session,
     movie_url: str,
 ) -> Movie | None:
+
     print(
         f"Reading movie page: {movie_url}"
     )
@@ -365,7 +369,9 @@ def extract_movie_info(
         "html.parser",
     )
 
-    source_id = get_source_id(movie_url)
+    source_id = get_source_id(
+        movie_url
+    )
 
     title = extract_title(
         soup,
@@ -378,9 +384,10 @@ def extract_movie_info(
     )
 
     if not download_url:
+
         print(
-            f"No valid '{EXACT_QUALITY}' download "
-            f"link found on this page."
+            f"No valid '{EXACT_QUALITY}' "
+            f"download link found."
         )
 
         return None
@@ -397,10 +404,6 @@ def extract_movie_info(
 def find_latest_movie(
     session: requests.Session,
 ) -> Movie | None:
-    """
-    Scan the source website and return the first movie
-    that contains the exact 1080p x264 option.
-    """
 
     movie_links = find_movie_links(
         session
@@ -417,28 +420,34 @@ def find_latest_movie(
         )
 
         try:
+
             movie = extract_movie_info(
                 session,
                 movie_url,
             )
 
         except requests.RequestException as exc:
+
             print(
                 f"Could not read movie page: {exc}"
             )
+
             continue
 
         except Exception as exc:
+
             print(
                 f"Unexpected scraper error: {exc}"
             )
+
             continue
 
         if movie is None:
             continue
 
         print(
-            f"Exact quality found: {EXACT_QUALITY}"
+            f"Exact quality found: "
+            f"{EXACT_QUALITY}"
         )
 
         print(
