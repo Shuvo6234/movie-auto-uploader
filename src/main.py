@@ -1,11 +1,10 @@
-import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from database import (
     add_completed_movie,
     is_downloaded,
+    uploaded_today,
 )
 from downloader import download_file
 from drive import upload_file, verify_upload
@@ -15,16 +14,16 @@ from scraper import create_session, find_latest_movie
 DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "downloads"
 
 
-def already_uploaded_today() -> bool:
-    # The daily limit is enforced by the GitHub Actions run itself.
-    # This function is intentionally kept simple; the workflow runs once daily.
-    return False
-
-
 def main() -> int:
     print("=" * 60)
     print("Movie Auto Uploader started")
     print("=" * 60)
+
+    # Hard daily limit.
+    if uploaded_today():
+        print("Today's successful upload limit has already been reached.")
+        print("Stopping without downloading another movie.")
+        return 0
 
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -42,12 +41,11 @@ def main() -> int:
     print(f"Source: {movie.source_url}")
     print(f"Download page: {movie.download_url}")
 
-    # Duplicate protection uses source ID and canonical source URL.
     if is_downloaded(
         source_id=movie.source_id,
         source_url=movie.source_url,
     ):
-        print("Movie already uploaded. Skipping.")
+        print("Movie already uploaded. Nothing to do.")
         return 0
 
     safe_title = "".join(
@@ -60,7 +58,6 @@ def main() -> int:
 
     output_path = DOWNLOAD_DIR / f"{safe_title} [1080p x264].mp4"
 
-    # Download
     print("Starting download...")
 
     try:
@@ -84,7 +81,6 @@ def main() -> int:
 
     print(f"Download completed: {file_size} bytes")
 
-    # Upload
     print("Uploading to Google Drive...")
 
     try:
@@ -98,7 +94,6 @@ def main() -> int:
 
     print(f"Drive file ID: {drive_file_id}")
 
-    # Verify upload
     print("Verifying Google Drive upload...")
 
     try:
@@ -116,7 +111,8 @@ def main() -> int:
 
     print("Drive upload verified successfully.")
 
-    # Only now mark the movie as completed.
+    # IMPORTANT:
+    # Only after successful verification do we record completion.
     add_completed_movie(
         source_id=movie.source_id,
         title=movie.title,
@@ -127,7 +123,6 @@ def main() -> int:
 
     print("Movie recorded in database.")
 
-    # Remove local file after successful verification.
     try:
         downloaded_file.unlink()
         print("Local temporary file removed.")
