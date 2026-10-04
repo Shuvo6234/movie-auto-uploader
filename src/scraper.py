@@ -5,16 +5,9 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-
 BASE_URL = "https://vegamoviess.io/"
-DOMAIN = "vegamoviess.io"
 
-BLOCKED_MARKERS = (
-    "verify that you are human",
-    "captcha",
-    "click to verify",
-    "human verification",
-)
+EXACT_QUALITY = "1080p x264"
 
 
 @dataclass
@@ -23,316 +16,164 @@ class Movie:
     title: str
     source_url: str
     download_url: str
-    quality: str = "1080p x264"
+    quality: str
 
 
 def create_session() -> requests.Session:
     session = requests.Session()
 
-    session.headers.update(
-        {
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/130.0 Safari/537.36"
-            )
-        }
-    )
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/130.0 Safari/537.36"
+        )
+    })
 
     return session
 
 
-def get_response(
-    session: requests.Session,
-    url: str,
-    timeout: int = 30,
-) -> requests.Response:
-
-    response = session.get(
-        url,
-        timeout=timeout,
-        allow_redirects=True,
-    )
-
-    response.raise_for_status()
-
-    return response
+def normalize_url(url: str) -> str:
+    return urljoin(BASE_URL, url)
 
 
-def get_soup(
-    session: requests.Session,
-    url: str,
-    timeout: int = 30,
-) -> BeautifulSoup:
+def get_source_id(url: str) -> str:
+    path = urlparse(url).path.rstrip("/")
+    filename = path.split("/")[-1]
 
-    response = get_response(
-        session,
-        url,
-        timeout,
-    )
-
-    content_type = (
-        response.headers.get("Content-Type", "")
-        .lower()
-    )
-
-    if "text/html" not in content_type:
-        raise RuntimeError(
-            f"Expected HTML page but received {content_type}"
-        )
-
-    text = response.text.lower()
-
-    for marker in BLOCKED_MARKERS:
-        if marker in text:
-            raise RuntimeError(
-                "Human verification/CAPTCHA detected."
-            )
-
-    return BeautifulSoup(response.text, "html.parser")
-
-
-def is_movie_url(url: str) -> bool:
-
-    parsed = urlparse(url)
-
-    if parsed.netloc.lower() != DOMAIN:
-        return False
-
-    path = parsed.path.lower()
-
-    return (
-        path.endswith(".html")
-        and bool(re.search(r"-\d{3,}-", path))
-    )
-
-
-def extract_source_id(url: str) -> str:
-
-    path = urlparse(url).path
-
-    match = re.search(r"/(\d+)-", path)
+    match = re.match(r"(\d+)", filename)
 
     if match:
         return match.group(1)
 
-    return url.rstrip("/").split("/")[-1]
+    return filename or url
+
+
+def is_movie_url(url: str) -> bool:
+    parsed = urlparse(url)
+
+    if parsed.netloc != urlparse(BASE_URL).netloc:
+        return False
+
+    return bool(
+        re.search(
+            r"-202[0-9]-.*\.html$",
+            parsed.path,
+            re.IGNORECASE,
+        )
+    )
 
 
 def find_movie_links(
     session: requests.Session,
-    page_url: str = BASE_URL,
 ) -> list[str]:
 
-    soup = get_soup(
-        session,
-        page_url,
+    response = session.get(
+        BASE_URL,
+        timeout=(20, 60),
     )
 
-    links: list[str] = []
-    seen: set[str] = set()
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser",
+    )
+
+    links = []
 
     for anchor in soup.find_all("a", href=True):
+        url = normalize_url(anchor["href"])
 
-        href = urljoin(
-            page_url,
-            anchor["href"],
-        )
-
-        if not is_movie_url(href):
-            continue
-
-        if href in seen:
-            continue
-
-        seen.add(href)
-        links.append(href)
+        if is_movie_url(url):
+            if url not in links:
+                links.append(url)
 
     return links
 
 
-def is_direct_file_url(
-    session: requests.Session,
-    url: str,
-) -> bool:
-
-    try:
-
-        response = session.get(
-            url,
-            stream=True,
-            timeout=(20, 30),
-            allow_redirects=True,
-        )
-
-        response.raise_for_status()
-
-        content_type = (
-            response.headers.get(
-                "Content-Type",
-                "",
-            )
-            .split(";")[0]
-            .strip()
-            .lower()
-        )
-
-        final_url = response.url.lower()
-
-        response.close()
-
-        if content_type.startswith("video/"):
-            return True
-
-        if content_type == "application/octet-stream":
-            return True
-
-        video_extensions = (
-            ".mkv",
-            ".mp4",
-            ".avi",
-            ".webm",
-            ".mov",
-        )
-
-        if any(
-            final_url.endswith(ext)
-            for ext in video_extensions
-        ):
-            return True
-
-    except Exception:
-        return False
-
-    return False
-
-
-def find_1080p_x264(
+def extract_movie_info(
     session: requests.Session,
     movie_url: str,
 ) -> Movie | None:
 
-    try:
+    response = session.get(
+        movie_url,
+        timeout=(20, 60),
+    )
 
-        soup = get_soup(
-            session,
-            movie_url,
-        )
+    response.raise_for_status()
 
-    except RuntimeError as exc:
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser",
+    )
 
-        print(
-            f"Skipping page: {movie_url}"
-        )
-        print(f"Reason: {exc}")
+    title = ""
 
-        return None
-
-    title = soup.find("h1")
-
-    if title:
-        movie_title = title.get_text(
+    if soup.title:
+        title = soup.title.get_text(
             " ",
             strip=True,
         )
-    else:
-        movie_title = (
-            soup.title.get_text(
+
+    if not title:
+        heading = soup.find("h1")
+
+        if heading:
+            title = heading.get_text(
                 " ",
                 strip=True,
             )
-            if soup.title
-            else movie_url
-        )
 
-    target_heading = None
+    quality_link = None
 
-    for heading in soup.find_all(
-        ["h2", "h3", "h4", "h5", "h6"]
+    for element in soup.find_all(
+        ["a", "h1", "h2", "h3", "h4", "div", "span"]
     ):
 
-        text = " ".join(
-            heading.get_text(
-                " ",
-                strip=True,
-            ).split()
+        text = element.get_text(
+            " ",
+            strip=True,
         )
 
-        if text.casefold() == "1080p x264":
-            target_heading = heading
-            break
+        if EXACT_QUALITY.lower() in text.lower():
 
-    if target_heading is None:
-        return None
-
-    current = target_heading.find_next()
-
-    while current is not None:
-
-        if (
-            current.name == "a"
-            and current.get("href")
-        ):
-
-            href = urljoin(
-                movie_url,
-                current["href"],
-            )
-
-            if urlparse(href).scheme not in {
-                "http",
-                "https",
-            }:
-                current = current.find_next()
-                continue
-
-            print(
-                f"Checking download link: {href}"
-            )
-
-            if is_direct_file_url(
-                session,
-                href,
-            ):
-
-                return Movie(
-                    source_id=extract_source_id(
-                        movie_url
-                    ),
-                    title=movie_title,
-                    source_url=movie_url,
-                    download_url=href,
-                )
-
-            print(
-                "Link is not a direct video file. Skipping."
-            )
-
-        if current.name in {
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-        }:
-
-            text = " ".join(
-                current.get_text(
-                    " ",
-                    strip=True,
-                ).split()
-            )
-
-            if (
-                text.casefold()
-                != "1080p x264"
-            ):
+            if element.name == "a" and element.get("href"):
+                quality_link = element
                 break
 
-        current = current.find_next()
+            parent = element.parent
 
-    return None
+            if parent:
+                candidate = parent.find(
+                    "a",
+                    href=True,
+                )
+
+                if candidate:
+                    quality_link = candidate
+                    break
+
+    if not quality_link:
+        return None
+
+    download_url = normalize_url(
+        quality_link.get("href")
+    )
+
+    source_id = get_source_id(
+        movie_url
+    )
+
+    return Movie(
+        source_id=source_id,
+        title=title or source_id,
+        source_url=movie_url,
+        download_url=download_url,
+        quality=EXACT_QUALITY,
+    )
 
 
 def find_latest_movie(
@@ -343,14 +184,35 @@ def find_latest_movie(
         session
     )
 
+    print(
+        f"Found {len(movie_links)} movie page(s)."
+    )
+
     for movie_url in movie_links:
 
-        movie = find_1080p_x264(
-            session,
-            movie_url,
+        print(
+            f"Checking movie: {movie_url}"
         )
 
-        if movie is not None:
-            return movie
+        try:
+            movie = extract_movie_info(
+                session,
+                movie_url,
+            )
+
+        except Exception as exc:
+            print(
+                f"Could not read movie page: {exc}"
+            )
+            continue
+
+        if movie is None:
+            continue
+
+        print(
+            f"Exact quality found: {EXACT_QUALITY}"
+        )
+
+        return movie
 
     return None
