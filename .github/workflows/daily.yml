@@ -63,8 +63,8 @@ jobs:
           from googleapiclient.http import MediaFileUpload
 
           SCOPES = [
-              "https://www.googleapis.com/auth/drive.file"
-          ]
+    "https://www.googleapis.com/auth/drive"
+]
 
           print("Connecting to Google Drive...")
 
