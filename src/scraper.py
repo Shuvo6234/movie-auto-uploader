@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-BASE_URL = "https://YOUR-AUTHORIZED-SOURCE.example/"
+BASE_URL = "https://vegamovies.digital/"
 TARGET_RESOLUTION = "1080p"
 
 
